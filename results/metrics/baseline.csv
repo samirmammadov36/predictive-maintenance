@@ -1,0 +1,2 @@
+model,scenario,mae,rmse
+median_baseline,clean,39.44,50.37836837373755

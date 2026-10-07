@@ -1,0 +1,27 @@
+{
+  "random_forest_selected": {
+    "n_estimators": 250,
+    "max_depth": null,
+    "min_samples_leaf": 1,
+    "train_seconds": 9.339103500002238,
+    "mae": 17.0276,
+    "rmse": 22.537580526755747
+  },
+  "xgboost_selected": {
+    "max_depth": 6,
+    "learning_rate": 0.05,
+    "subsample": 0.9,
+    "colsample_bytree": 0.9,
+    "best_iteration": 42,
+    "train_seconds": 0.18018310000479687,
+    "mae": 17.718406677246094,
+    "rmse": 23.373954303424416
+  },
+  "lstm_best": {
+    "epoch": 1,
+    "train_mse": 6651.0922099646505,
+    "mae": 9.415445899963379,
+    "rmse": 11.551076578621064
+  },
+  "note": "Models selected on clean validation-prefix RMSE with MAE as tie-breaker; official test data was not used for tuning."
+}

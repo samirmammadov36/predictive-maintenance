@@ -2,11 +2,40 @@ project:
   name: predictive-maintenance
   dataset: NASA C-MAPSS FD001
   seed: 42
+  rul_cap: 125
+  validation_fraction: 0.20
+  validation_prefix_fraction: 0.70
+
 split:
   train_fraction: 0.8
   validation_prefix_fraction: 0.70
+
 sequence:
   window: 30
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  train_file: train_FD001.txt
+  test_file: test_FD001.txt
+  test_rul_file: RUL_FD001.txt
+
+screening:
+  near_constant_unique_ratio: 0.0005
+  near_constant_dominant_fraction: 0.995
+
+features:
+  rolling_window: 10
+
+lstm:
+  window: 30
+  hidden_units: 32
+  dense_units: 16
+  batch_size: 64
+  learning_rate: 0.001
+  max_epochs: 50
+  patience: 5
+
 missingness:
   scenarios:
     S0: clean
@@ -14,11 +43,20 @@ missingness:
     S2: random_20_percent
     S3: short_sensor_gap
   seeds: [7, 17, 27]
+  random_rates: [0.10, 0.20]
+  short_gap_sensor: sensor_11
+  short_gap_cycles: 5
+
 models:
   baseline: median
   random_forest: true
   xgboost: true
   lstm: true
+
+evaluation:
+  primary_metric: rmse
+  tie_breaker: mae
+
 dashboard:
   top_k: [5, 10]
   health_thresholds:

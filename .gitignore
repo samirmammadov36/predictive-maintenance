@@ -218,3 +218,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Predictive-maintenance local data and trained artifacts
+# Raw/processed data and large model/preprocessing binaries are reproducible locally and should not be committed.
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+artifacts/models/*
+!artifacts/models/.gitkeep
+artifacts/preprocessing/*
+!artifacts/preprocessing/.gitkeep
+
+# Large per-engine checkpoint prediction dump (regenerable)
+results/metrics/predictions.csv
