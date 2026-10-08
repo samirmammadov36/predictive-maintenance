@@ -28,6 +28,7 @@ from predictive_maintenance.imputation import TrainingMedians
 from predictive_maintenance.prepared import PreparedBundle
 from predictive_maintenance.screening import screen_sensors
 from predictive_maintenance.sequences import fit_sequence_scaler
+from predictive_maintenance.sequence_metadata import build_sequence_input_metadata
 
 
 def main() -> None:
@@ -76,6 +77,8 @@ def main() -> None:
     val_clean = medians.median_fill(val_df, selected)
     test_clean = medians.median_fill(official_test, selected)
 
+    if len(train_ids) != 80 or len(val_ids) != 20 or set(train_clean.engine_id) != set(train_ids):
+        raise ValueError("Sequence scaling requires exactly the 80 training engines and 20 validation engines")
     sequence_scaler = fit_sequence_scaler(train_clean, selected)
 
     engineered_train, feature_columns = build_tabular_features(
@@ -114,7 +117,17 @@ def main() -> None:
     }
     dump_json(split_manifest, prep_dir / "split_manifest.json")
     dump_json({"selected_sensors": selected, "feature_columns": feature_columns}, prep_dir / "schema.json")
-    dump_json(manifests_as_dict([train_path, test_path, rul_path]), prep_dir / "data_manifest.json")
+    data_manifest = manifests_as_dict([train_path, test_path, rul_path])
+    sequence_metadata = build_sequence_input_metadata(
+        train_clean, selected, sequence_scaler,
+        dataset=cfg["project"]["dataset"].split()[-1],
+        window=bundle.lstm_window,
+        split_info={**split_manifest, "validation_prefix_fraction": cfg["project"]["validation_prefix_fraction"]},
+        rul_cap=cfg["project"]["rul_cap"],
+        training_source_manifest=data_manifest[0],
+    )
+    dump_json(data_manifest, prep_dir / "data_manifest.json")
+    dump_json(sequence_metadata, prep_dir / "sequence_input_metadata.json")
 
     checks = {
         "train_engines": len(train_ids),

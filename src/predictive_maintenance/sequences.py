@@ -5,19 +5,67 @@ from numbers import Integral
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils.validation import check_is_fitted
 
-from .constants import CYCLE_COLUMN, ID_COLUMN
+from .constants import CYCLE_COLUMN, ID_COLUMN, SENSOR_COLUMNS
+
+
+def _validate_sensor_columns(sensor_columns: list[str]) -> None:
+    if not isinstance(sensor_columns, (list, tuple)) or not sensor_columns:
+        raise ValueError("sensor_columns must be a non-empty ordered list")
+    if any(not isinstance(column, str) or column not in SENSOR_COLUMNS for column in sensor_columns):
+        raise ValueError("sensor_columns must contain valid FD001 sensor names only")
+    if len(set(sensor_columns)) != len(sensor_columns):
+        raise ValueError("sensor_columns must not contain duplicate names")
+
+
+def _sequence_sensor_frame(df: pd.DataFrame, sensor_columns: list[str]) -> pd.DataFrame:
+    _validate_sensor_columns(sensor_columns)
+    if df.empty:
+        raise ValueError("Sequence scaling input must not be empty")
+    missing = [column for column in sensor_columns if column not in df.columns]
+    if missing:
+        raise ValueError(f"Missing sensor columns: {missing}")
+    if df.columns[df.columns.duplicated()].isin(sensor_columns).any():
+        raise ValueError("Selected sensor columns have duplicate DataFrame labels")
+    sensors = df[list(sensor_columns)]
+    try:
+        if np.iscomplexobj(sensors.to_numpy()):
+            raise ValueError
+        values = sensors.to_numpy(dtype=np.float64)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Selected sensor columns must contain finite numeric values") from exc
+    if not np.isfinite(values).all():
+        raise ValueError("Selected sensor columns must contain finite numeric values")
+    return sensors
+
+
+def validate_sequence_scaler(scaler: StandardScaler, sensor_columns: list[str]) -> None:
+    """Check the fitted input schema without changing scaler statistics."""
+    _validate_sensor_columns(sensor_columns)
+    if not isinstance(scaler, StandardScaler):
+        raise ValueError("Sequence scaler must be a StandardScaler")
+    try:
+        check_is_fitted(scaler)
+    except ValueError as exc:
+        raise ValueError("Sequence scaler must be fitted before use") from exc
+    if scaler.n_features_in_ != len(sensor_columns):
+        raise ValueError("Sensor count does not match the fitted sequence scaler")
+    if hasattr(scaler, "feature_names_in_") and list(scaler.feature_names_in_) != list(sensor_columns):
+        raise ValueError("Sensor order does not match the fitted sequence scaler")
 
 
 def fit_sequence_scaler(train_df: pd.DataFrame, sensor_columns: list[str]) -> StandardScaler:
     scaler = StandardScaler()
-    scaler.fit(train_df[sensor_columns])
+    scaler.fit(_sequence_sensor_frame(train_df, sensor_columns))
     return scaler
 
 
 def scale_sequence_frame(df: pd.DataFrame, sensor_columns: list[str], scaler: StandardScaler) -> pd.DataFrame:
+    sensors = _sequence_sensor_frame(df, sensor_columns)
+    validate_sequence_scaler(scaler, sensor_columns)
     out = df.copy()
-    out[sensor_columns] = scaler.transform(out[sensor_columns])
+    out[list(sensor_columns)] = scaler.transform(sensors)
     return out
 
 

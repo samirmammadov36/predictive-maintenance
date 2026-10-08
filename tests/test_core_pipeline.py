@@ -15,7 +15,9 @@ from predictive_maintenance.data import add_training_rul, split_development_engi
 from predictive_maintenance.features import build_tabular_features
 from predictive_maintenance.imputation import TrainingMedians
 from predictive_maintenance.masks import apply_sensor_mask, nested_random_masks, short_gap_mask
-from predictive_maintenance.sequences import build_prefix_window, build_training_windows, left_padded_window
+from predictive_maintenance.sequences import (
+    build_prefix_window, build_training_windows, fit_sequence_scaler, left_padded_window, scale_sequence_frame,
+)
 
 
 def _frame() -> pd.DataFrame:
@@ -302,3 +304,81 @@ def test_sequence_causality_and_explicit_prefix_truncation(cycle):
         build_prefix_window(changed, sensors)[-1],
         np.array([10045, 10145], dtype=np.float32),
     )
+
+
+def test_sequence_scaler_uses_training_statistics_and_never_refits(monkeypatch):
+    train = pd.DataFrame({"engine_id": [2, 9, 2], "cycle": [1, 1, 2],
+                          "sensor_1": [1.0, 3.0, 5.0], "sensor_2": [10.0, 14.0, 18.0]})
+    columns = ["sensor_2", "sensor_1"]
+    scaler = fit_sequence_scaler(train, columns)
+    np.testing.assert_allclose(scaler.mean_, [14.0, 3.0])
+    np.testing.assert_allclose(scaler.var_, [32.0 / 3.0, 8.0 / 3.0])
+    assert scaler.n_samples_seen_ == 3
+    assert list(scaler.feature_names_in_) == columns
+    before = {name: getattr(scaler, name).copy() for name in ("mean_", "var_", "scale_", "feature_names_in_")}
+
+    def forbidden_fit(*args, **kwargs):
+        raise AssertionError("Transform must never refit the scaler")
+
+    monkeypatch.setattr(scaler, "fit", forbidden_fit)
+    for extreme in (1e9, -1e12):
+        held_out = train.assign(sensor_1=extreme, sensor_2=-extreme, dataset_split="held_out", rul_true=999)
+        original = held_out.copy(deep=True)
+        transformed = scale_sequence_frame(held_out, columns, scaler)
+        np.testing.assert_allclose(transformed[columns], np.tile(
+            [(-extreme - 14.0) / np.sqrt(32.0 / 3.0), (extreme - 3.0) / np.sqrt(8.0 / 3.0)], (3, 1)))
+        pd.testing.assert_frame_equal(transformed.drop(columns=columns), original.drop(columns=columns))
+        pd.testing.assert_frame_equal(held_out, original)
+    for name, values in before.items():
+        np.testing.assert_array_equal(getattr(scaler, name), values)
+    assert scaler.n_samples_seen_ == 3
+
+
+@pytest.mark.parametrize("columns,message", [
+    ([], "non-empty"),
+    (["sensor_1", "sensor_1"], "duplicate"),
+    (["sensor_3"], "Missing sensor"),
+    (["engine_id"], "valid FD001 sensor"),
+    (["setting_1"], "valid FD001 sensor"),
+    (["sensor_22"], "valid FD001 sensor"),
+    ([None], "valid FD001 sensor"),
+    ([1], "valid FD001 sensor"),
+    ([""], "valid FD001 sensor"),
+    ("sensor_1", "non-empty"),
+])
+def test_sequence_scaling_rejects_invalid_sensor_columns(columns, message):
+    df = _sequence_frame(2)
+    scaler = fit_sequence_scaler(df, ["sensor_1", "sensor_2"])
+    with pytest.raises(ValueError, match=message):
+        fit_sequence_scaler(df, columns)
+    with pytest.raises(ValueError, match=message):
+        scale_sequence_frame(df, columns, scaler)
+
+
+def test_sequence_scaling_rejects_reordered_sensors():
+    df = _sequence_frame(2)
+    scaler = fit_sequence_scaler(df, ["sensor_2", "sensor_1"])
+    with pytest.raises(ValueError, match="Sensor order"):
+        scale_sequence_frame(df, ["sensor_1", "sensor_2"], scaler)
+
+
+def test_sequence_scaling_rejects_ambiguous_dataframe_columns():
+    df = _sequence_frame(2)
+    scaler = fit_sequence_scaler(df, ["sensor_1"])
+    duplicated = pd.concat([df, df[["sensor_1"]]], axis=1)
+    with pytest.raises(ValueError, match="duplicate DataFrame labels"):
+        fit_sequence_scaler(duplicated, ["sensor_1"])
+    with pytest.raises(ValueError, match="duplicate DataFrame labels"):
+        scale_sequence_frame(duplicated, ["sensor_1"], scaler)
+
+
+@pytest.mark.parametrize("invalid", [np.nan, np.inf, -np.inf, "invalid"])
+def test_sequence_scaling_rejects_invalid_sensor_measurements(invalid):
+    df = _sequence_frame(2)
+    scaler = fit_sequence_scaler(df, ["sensor_1"])
+    df["sensor_1"] = df["sensor_1"].astype(object)
+    df.loc[0, "sensor_1"] = invalid
+    with pytest.raises(ValueError, match="finite numeric"):
+        fit_sequence_scaler(df, ["sensor_1"])
+    with pytest.raises(ValueError, match="finite numeric"):
+        scale_sequence_frame(df, ["sensor_1"], scaler)
