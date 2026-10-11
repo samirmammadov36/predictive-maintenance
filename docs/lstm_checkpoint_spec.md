@@ -1,0 +1,18 @@
+# LSTM checkpoint selection and input compatibility
+
+The scoped model remains one LSTM with 32 hidden units, Dense 16 with ReLU, and one linear RUL output. Inputs use 30-cycle windows. Training defaults remain batch size 64, Adam learning rate 0.001, at most 50 epochs and patience 5.
+
+Each epoch is scored on the clean validation prefixes with uncapped validation truth; negative predictions are clamped to zero for scoring by the existing evaluator. Selection compares `(rmse, mae)` exactly: lower RMSE wins, equal RMSE with lower MAE wins, and equality of both retains the earlier epoch. The former RMSE-only `1e-8` deadband is removed so the restored checkpoint and lexicographic selection agree. Official test scores never enter this selection.
+
+Early stopping retains consecutive non-improvement counting: a selected checkpoint resets stale epochs to zero; otherwise stale increases by one, and training stops at patience. An RMSE tie resolved by lower MAE counts as improvement and resets patience. A tie in both metrics consumes patience. Returned `selected_epoch` and `selected_validation` describe the restored weights; the training script uses that same record for `lstm_best` in the validation summary.
+
+Saving keeps `artifacts/models/lstm.pt` as a state dictionary and preserves `lstm_meta.joblib` with config/meta. It additionally writes `lstm_checkpoint_metadata.json` with schema version, fixed architecture, training configuration, selection rule, selected epoch/metrics, a frozen snapshot of Task 9's `sequence_input_metadata.json`, and the saved checkpoint SHA-256. Input metadata is validated against the bundle/scaler and split manifest before training, and checked again at save time.
+
+The existing saved-model path calls `load_lstm_checkpoint()`. Loading requires the checkpoint metadata and current preprocessing metadata/split manifest. It checks the Task 9 contract against the supplied scaler, sensor order, window and engine split; exact snapshot equality; fixed architecture/configuration; selected epoch/metrics; checkpoint checksum; and strict weight tensor compatibility. Checksum pairing detects accidental checkpoint/sidecar swaps; it is not an authentication system. Task 9's validator does not authenticate scaler statistics, so these checks do not independently reproduce preprocessing or training.
+
+
+Validation-prefix provenance independently enforces the project's fixed fraction `0.70`. The bundle must contain exactly the validation engine keys in `validation_prefix_cycles`. For each engine, the expected endpoint is the cycle at chronological observation `max(1, floor(0.70 * trajectory row count))`. This offline preparation/provenance check inspects only engine/cycle metadata from full validation trajectories; it does not pass hidden future sensor rows to model inputs or replay. Prefix construction and checkpoint selection remain unchanged.
+
+Older checkpoints without this metadata fail clearly with `legacy compatibility is unverified`. There is no silent legacy fallback or automatic metadata fabrication. New checkpoint artifacts must be produced through the updated training/save path after verified preparation; historical metrics remain historical results.
+
+Verification uses tiny synthetic CPU inputs and temporary artifacts. Controlled validation metrics exercise selection and patience while actual optimization/restoration checks weights. The script and saved-model path tests isolate non-LSTM models/config loading. These tests do not establish real FD001 training/evaluation, dashboard/replay behavior or raw-before-imputation runner correctness.

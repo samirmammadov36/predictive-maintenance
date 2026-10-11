@@ -44,6 +44,14 @@ def _predict(model: nn.Module, X: np.ndarray, device: str) -> np.ndarray:
 
 
 def train_lstm(X_train, y_train, X_val, y_val, cfg: LSTMConfig):
+    if cfg.hidden_units != 32 or cfg.dense_units != 16:
+        raise ValueError("Scoped LSTM architecture requires hidden_units=32 and dense_units=16")
+    if cfg.max_epochs <= 0 or cfg.patience <= 0:
+        raise ValueError("max_epochs and patience must be positive")
+    for name, X in (("training", X_train), ("validation", X_val)):
+        shape = np.shape(X)
+        if len(shape) != 3 or shape[1:] != (30, cfg.input_size) or shape[0] == 0:
+            raise ValueError(f"{name} sequences must have shape (samples, 30, input_size)")
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -57,7 +65,8 @@ def train_lstm(X_train, y_train, X_val, y_val, cfg: LSTMConfig):
     )
 
     best_state = None
-    best_rmse = float("inf")
+    best_key = (float("inf"), float("inf"))
+    selected_validation = None
     stale = 0
     history = []
     start = time.perf_counter()
@@ -77,8 +86,12 @@ def train_lstm(X_train, y_train, X_val, y_val, cfg: LSTMConfig):
         val_pred = _predict(model, X_val, device)
         metrics = regression_metrics(y_val, val_pred)
         history.append({"epoch": epoch, "train_mse": float(np.mean(batch_losses)), **metrics})
-        if metrics["rmse"] < best_rmse - 1e-8:
-            best_rmse = metrics["rmse"]
+        key = (metrics["rmse"], metrics["mae"])
+        if not np.isfinite(key).all():
+            raise ValueError("Clean validation-prefix metrics must be finite")
+        if key < best_key:
+            best_key = key
+            selected_validation = history[-1].copy()
             best_state = copy.deepcopy(model.state_dict())
             stale = 0
         else:
@@ -88,7 +101,11 @@ def train_lstm(X_train, y_train, X_val, y_val, cfg: LSTMConfig):
 
     if best_state is not None:
         model.load_state_dict(best_state)
-    return model, history, {"train_seconds": time.perf_counter() - start, "device": device, **asdict(cfg)}
+    return model, history, {
+        "train_seconds": time.perf_counter() - start, "device": device, **asdict(cfg),
+        "selected_epoch": selected_validation["epoch"],
+        "selected_validation": selected_validation,
+    }
 
 
 def predict_lstm(model: nn.Module, X: np.ndarray) -> np.ndarray:

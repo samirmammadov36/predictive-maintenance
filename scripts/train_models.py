@@ -7,7 +7,6 @@ import sys
 import joblib
 import numpy as np
 import pandas as pd
-import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -18,6 +17,7 @@ from predictive_maintenance.constants import RUL_TARGET_COLUMN
 from predictive_maintenance.features import build_tabular_features
 from predictive_maintenance.models.baseline import MedianRULBaseline
 from predictive_maintenance.models.lstm import LSTMConfig, train_lstm
+from predictive_maintenance.models.lstm_checkpoint import read_lstm_input_metadata, save_lstm_checkpoint
 from predictive_maintenance.models.random_forest import train_random_forest
 from predictive_maintenance.models.xgboost_model import train_xgboost
 from predictive_maintenance.prefixes import make_validation_sequence_matrix, make_validation_tabular_matrix
@@ -27,6 +27,7 @@ from predictive_maintenance.sequences import build_training_windows, scale_seque
 def main() -> None:
     cfg = load_config(ROOT / "config.yaml")
     bundle = joblib.load(ROOT / "artifacts/preprocessing/prepared_bundle.joblib")
+    sequence_input_metadata = read_lstm_input_metadata(bundle, ROOT / "artifacts")
     model_dir = ROOT / "artifacts/models"
     result_dir = ROOT / "results/metrics"
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -67,14 +68,13 @@ def main() -> None:
         seed=cfg["project"]["seed"],
     )
     lstm, lstm_history, lstm_meta = train_lstm(X_train_seq, y_train_seq, X_val_seq, y_val_seq, lstm_cfg)
-    torch.save(lstm.state_dict(), model_dir / "lstm.pt")
-    dump_joblib({"config": {k: v for k, v in lstm_meta.items() if k in LSTMConfig.__dataclass_fields__}, "meta": lstm_meta}, model_dir / "lstm_meta.joblib")
+    save_lstm_checkpoint(lstm, bundle, ROOT / "artifacts", lstm_cfg, lstm_meta, sequence_input_metadata)
     pd.DataFrame(lstm_history).to_csv(result_dir / "lstm_training_history.csv", index=False)
 
     summary = {
         "random_forest_selected": min(rf_log, key=lambda r: (r["rmse"], r["mae"])),
         "xgboost_selected": min(xgb_log, key=lambda r: (r["rmse"], r["mae"])),
-        "lstm_best": min(lstm_history, key=lambda r: (r["rmse"], r["mae"])),
+        "lstm_best": lstm_meta["selected_validation"],
         "note": "Models selected on clean validation-prefix RMSE with MAE as tie-breaker; official test data was not used for tuning.",
     }
     dump_json(summary, result_dir / "validation_selection_summary.json")

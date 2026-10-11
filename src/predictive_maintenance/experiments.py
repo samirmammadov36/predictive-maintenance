@@ -5,7 +5,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import torch
 import xgboost as xgb
 
 from .artifacts import load_joblib
@@ -13,7 +12,8 @@ from .constants import CYCLE_COLUMN, ID_COLUMN, RUL_TRUTH_COLUMN
 from .evaluation import regression_metrics
 from .features import build_tabular_features
 from .masks import apply_sensor_mask, nested_random_masks, short_gap_mask
-from .models.lstm import LSTMConfig, RULLSTM, predict_lstm
+from .models.lstm import predict_lstm
+from .models.lstm_checkpoint import load_lstm_checkpoint
 from .sequences import build_prefix_window, scale_sequence_frame
 
 
@@ -41,11 +41,7 @@ def _load_models(bundle, artifact_dir: Path):
     rf = load_joblib(artifact_dir / "models/random_forest.joblib")
     xgb_model = xgb.XGBRegressor()
     xgb_model.load_model(artifact_dir / "models/xgboost.json")
-    lstm_meta = load_joblib(artifact_dir / "models/lstm_meta.joblib")
-    cfg = LSTMConfig(**lstm_meta["config"])
-    lstm = RULLSTM(cfg.input_size, cfg.hidden_units, cfg.dense_units)
-    lstm.load_state_dict(torch.load(artifact_dir / "models/lstm.pt", map_location="cpu"))
-    lstm.eval()
+    lstm = load_lstm_checkpoint(bundle, artifact_dir)
     return {"random_forest": rf, "xgboost": xgb_model, "lstm": lstm}
 
 
