@@ -20,3 +20,14 @@ class PreparedBundle:
     tabular_scaler: object
     rolling_window: int
     lstm_window: int
+    official_test_raw_df: pd.DataFrame | None = None
+
+
+def official_test_raw_frame(bundle) -> pd.DataFrame:
+    raw = getattr(bundle, "official_test_raw_df", None)
+    if not isinstance(raw, pd.DataFrame):
+        raise ValueError(
+            "Prepared bundle lacks raw official-test inputs. Regenerate with `python scripts/prepare_data.py` "
+            "in the project .venv using original FD001 files; median-imputed official_test_df cannot be used as raw."
+        )
+    return raw

@@ -23,6 +23,7 @@ from predictive_maintenance.data import (
     split_development_engines,
     validation_prefixes,
 )
+from predictive_maintenance.evaluation import FD001_ENGINE_IDS, validate_official_test_inputs
 from predictive_maintenance.features import build_tabular_features
 from predictive_maintenance.imputation import TrainingMedians
 from predictive_maintenance.prepared import PreparedBundle
@@ -51,6 +52,8 @@ def main() -> None:
     full_train = add_training_rul(read_cmapss_file(train_path), cap=cfg["project"]["rul_cap"])
     official_test = read_cmapss_file(test_path)
     test_rul = read_test_rul(rul_path)
+    if len(test_rul) != 100 or set(test_rul.index) != set(FD001_ENGINE_IDS):
+        raise ValueError("FD001 preparation requires exactly the 100 official-test engine RUL labels")
     test_targets = official_test_targets(official_test, test_rul)
 
     train_ids, val_ids = split_development_engines(
@@ -72,6 +75,7 @@ def main() -> None:
         raise RuntimeError("Sensor screening removed every sensor")
     screening_report.to_csv(processed / "sensor_screening.csv", index=False)
 
+    validate_official_test_inputs(official_test, test_targets, selected)
     medians = TrainingMedians.fit(train_df, selected)
     train_clean = medians.median_fill(train_df, selected)
     val_clean = medians.median_fill(val_df, selected)
@@ -103,6 +107,7 @@ def main() -> None:
         tabular_scaler=tabular_scaler,
         rolling_window=cfg["features"]["rolling_window"],
         lstm_window=cfg["lstm"]["window"],
+        official_test_raw_df=official_test.copy(),
     )
     dump_joblib(bundle, prep_dir / "prepared_bundle.joblib")
     dump_joblib(medians, prep_dir / "training_medians.joblib")
