@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import json
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -355,8 +356,8 @@ def test_real_entrypoint_enforces_100_engine_requirement(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("label_count", [99, 100, 101])
 def test_preparation_stores_raw_inputs_and_rejects_extra_missing_labels(tmp_path, monkeypatch, label_count):
-    cfg = {"project": {"dataset": "NASA C-MAPSS FD001", "seed": 42, "rul_cap": 125,
-                       "validation_fraction": 0.2, "validation_prefix_fraction": 0.7},
+    cfg = {"project": {"dataset": "NASA C-MAPSS FD001", "seed": 42, "rul_cap": 125},
+           "split": {"train_fraction": 0.8, "validation_prefix_fraction": 0.70},
            "data": {"raw_dir": "data/raw", "processed_dir": "data/processed", "train_file": "synthetic_train.txt",
                     "test_file": "synthetic_test.txt", "test_rul_file": "synthetic_RUL.txt"},
            "features": {"rolling_window": 10}, "lstm": {"window": 30},
@@ -391,4 +392,6 @@ def test_preparation_stores_raw_inputs_and_rejects_extra_missing_labels(tmp_path
     assert bundle.official_test_df.loc[1, "sensor_11"] == bundle.medians.values["sensor_11"]
     assert bundle.official_test_targets.rul_true.max() == 299
     assert len(bundle.train_engine_ids) == 80 and len(bundle.validation_engine_ids) == 20
+    metadata = json.loads((tmp_path / "artifacts/preprocessing/sequence_input_metadata.json").read_text())
+    assert metadata["split"]["validation_prefix_fraction"] == cfg["split"]["validation_prefix_fraction"]
     np.testing.assert_allclose(bundle.sequence_scaler.mean_, bundle.train_df[bundle.selected_sensors].mean().to_numpy())

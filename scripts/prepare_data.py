@@ -58,12 +58,12 @@ def main() -> None:
 
     train_ids, val_ids = split_development_engines(
         full_train,
-        cfg["project"]["validation_fraction"],
+        1 - cfg["split"]["train_fraction"],
         cfg["project"]["seed"],
     )
     train_df = full_train[full_train.engine_id.isin(train_ids)].copy()
     val_df = full_train[full_train.engine_id.isin(val_ids)].copy()
-    prefix_cycles = validation_prefixes(val_df, val_ids, cfg["project"]["validation_prefix_fraction"])
+    prefix_cycles = validation_prefixes(val_df, val_ids, cfg["split"]["validation_prefix_fraction"])
 
     selected, screening_report = screen_sensors(
         train_df,
@@ -127,7 +127,7 @@ def main() -> None:
         train_clean, selected, sequence_scaler,
         dataset=cfg["project"]["dataset"].split()[-1],
         window=bundle.lstm_window,
-        split_info={**split_manifest, "validation_prefix_fraction": cfg["project"]["validation_prefix_fraction"]},
+        split_info={**split_manifest, "validation_prefix_fraction": cfg["split"]["validation_prefix_fraction"]},
         rul_cap=cfg["project"]["rul_cap"],
         training_source_manifest=data_manifest[0],
     )

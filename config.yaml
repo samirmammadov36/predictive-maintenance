@@ -3,8 +3,6 @@ project:
   dataset: NASA C-MAPSS FD001
   seed: 42
   rul_cap: 125
-  validation_fraction: 0.20
-  validation_prefix_fraction: 0.70
 
 split:
   train_fraction: 0.8

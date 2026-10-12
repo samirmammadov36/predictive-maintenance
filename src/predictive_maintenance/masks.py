@@ -137,6 +137,7 @@ def apply_sensor_mask(df: pd.DataFrame, mask: pd.DataFrame, sensor_columns: list
     if mask.isna().any().any() or not all(pd.api.types.is_bool_dtype(dtype) for dtype in mask.dtypes):
         raise ValueError("Mask cells must be boolean values without missing values")
     out = df.copy()
+    out[sensor_columns] = out[sensor_columns].astype("float64")
     aligned = mask.reindex(index=out.index, columns=sensor_columns)
     out.loc[:, sensor_columns] = out[sensor_columns].mask(aligned)
     return out

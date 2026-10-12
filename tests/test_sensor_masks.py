@@ -307,3 +307,18 @@ def test_explicit_prefix_is_isolated_from_future_sensor_changes(seed, cutoff):
     pd.testing.assert_frame_equal(gap, changed_gap)
     assert sensor == changed_sensor == "sensor_11"
     assert gap.index.equals(prefix.index)
+
+
+def test_integer_sensor_masking_preserves_guarded_alignment_and_metadata():
+    prefix = pd.DataFrame({"engine_id": [3, 3, 3], "cycle": [1, 2, 3],
+                           "sensor_11": [10, 20, 30], "sensor_2": [40, 50, 60],
+                           "setting_1": [1, 1, 1], "rul_true": [200, 199, 198]}, index=[10, 30, 20])
+    original = prefix.copy(deep=True)
+    mask = pd.DataFrame(False, index=prefix.index, columns=["sensor_2", "sensor_11"])
+    mask.loc[30, "sensor_11"] = True
+    output = apply_sensor_mask(prefix, mask.iloc[::-1], ["sensor_11", "sensor_2"])
+    assert output.sensor_11.iloc[0] == 10 and pd.isna(output.sensor_11.iloc[1]) and output.sensor_11.iloc[2] == 30
+    assert output.sensor_2.tolist() == [40.0, 50.0, 60.0]
+    assert output[["sensor_11", "sensor_2"]].dtypes.tolist() == [np.dtype("float64")] * 2
+    pd.testing.assert_frame_equal(output.drop(columns=["sensor_11", "sensor_2"]), original.drop(columns=["sensor_11", "sensor_2"]))
+    pd.testing.assert_frame_equal(prefix, original)
