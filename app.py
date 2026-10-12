@@ -103,15 +103,14 @@ def build_replay(engine, observed_cycle, model_name, model, bundle, scenario, re
         rows.append({"cycle": int(cycle), "rul_pred": predict_prefix(model_name, model, recovered, bundle)})
     return recovered, pd.DataFrame(rows)
 
-def build_lstm_queue(resources, dataset_split, observed_cycle, k, *, scenario="clean", recovery="median", seed=None):
-    """Rank visible engines in one namespace at the selected replay cutoff."""
-    observed_cycle = _positive_integer(observed_cycle, "observed_cycle")
+def build_lstm_queue(resources, dataset_split, k, *, scenario="clean", recovery="median", seed=None):
+    """Rank every engine in one namespace at its own final observed cycle."""
     rows = []
     for (split, engine), cycles in resources.engine_cycles.items():
-        if split != dataset_split or cycles[0] > observed_cycle:
+        if split != dataset_split:
             continue
         result = resources.adapter.predict(
-            resources.raw_trajectories, engine, observed_cycle, dataset_split=split,
+            resources.raw_trajectories, engine, cycles[-1], dataset_split=split,
             scenario=scenario, recovery=recovery, seed=seed,
         )
         if not np.isfinite(result.rul_pred):
@@ -119,7 +118,7 @@ def build_lstm_queue(resources, dataset_split, observed_cycle, k, *, scenario="c
         rows.append({"dataset_split": split, "engine_id": engine,
                      "observed_cycle": result.cycle, "rul_pred": max(float(result.rul_pred), 0.0)})
     if not rows:
-        raise ValueError("No engines have visible observations in the selected namespace")
+        raise ValueError("No engines in the selected namespace")
     return top_k_queue(pd.DataFrame(rows), k=k)
 
 def run_app(artifact_dir: str | Path | None = None):
@@ -181,14 +180,15 @@ def run_app(artifact_dir: str | Path | None = None):
     with st.expander("Fleet inspection queue"):
         st.write(QUEUE_NOTE)
         st.caption(
-            "LSTM queue uses the selected namespace and replay cutoff for every engine. "
-            "Engines with no observations by that cutoff are omitted. Click again after changing controls; "
+            "LSTM queue ranks every engine in the selected namespace at its own final observed cycle. "
+            "Snapshot cycle lengths differ; the replay slider does not affect this demonstration queue. "
+            "Click again after changing scenario/recovery/seed or artifacts; "
             "queue results are not cached."
         )
         if st.button("Calculate fleet queue", type="primary", key="calculate_queue"):
             try:
                 queue = build_lstm_queue(
-                    resources, identity[0], observed_cycle, k,
+                    resources, identity[0], k,
                     scenario=scenario, recovery=recovery, seed=seed,
                 )
             except Exception as exc:
