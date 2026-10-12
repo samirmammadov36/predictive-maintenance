@@ -1,16 +1,21 @@
-"""Saved LSTM replay; other model and queue integration remains team-owned."""
+"""Validated LSTM dashboard/replay; other model adapters await Task 25."""
 from pathlib import Path
 import sys
 
+import numpy as np
+import pandas as pd
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from predictive_maintenance.dashboard import (
-    HEALTH_STATUS_NOTE, health_label, plot_rul_history, plot_sensor_history,
+    HEALTH_STATUS_NOTE, QUEUE_NOTE, health_label, plot_rul_history, plot_sensor_history, top_k_queue,
 )
 from predictive_maintenance.replay import artifact_fingerprint, build_lstm_replay, load_replay_resources
+from predictive_maintenance.inference import _positive_integer, _visible_prefix
+from predictive_maintenance.features import build_tabular_features
+from predictive_maintenance.masks import apply_sensor_mask, nested_random_masks, short_gap_mask
 
 SCENARIOS = {"S0 Clean": "clean", "S1 Random 10%": "random_10",
              "S2 Random 20%": "random_20", "S3 Short gap": "short_gap"}
@@ -25,17 +30,112 @@ def _cached_resources(artifact_dir: str, fingerprint: tuple):
     return resources
 
 
+
+
+# Retained teammate preparation/prediction helpers for the future Task 25 adapter.
+# The application does not enable these non-LSTM paths without artifact compatibility checks.
+def corrupt_prefix(prefix: pd.DataFrame, bundle, scenario: str, seed: int) -> pd.DataFrame:
+    """Apply a deterministic sensor-missingness scenario to the visible prefix only."""
+    sensors = bundle.selected_sensors
+    if scenario == "Clean":
+        return prefix.copy()
+    if scenario in {"Random 10%", "Random 20%"}:
+        low_mask, high_mask = nested_random_masks(prefix, sensors, seed)
+        mask = low_mask if scenario == "Random 10%" else high_mask
+    elif scenario == "Five-cycle sensor gap":
+        mask, _ = short_gap_mask(prefix, sensors, preferred_sensor="sensor_11", gap_cycles=5)
+    else:
+        raise ValueError(f"Unknown missingness scenario: {scenario}")
+    return apply_sensor_mask(prefix, mask, sensors)
+
+
+def recover_prefix(prefix: pd.DataFrame, bundle, recovery: str) -> pd.DataFrame:
+    if recovery == "Training median":
+        return bundle.medians.median_fill(prefix, bundle.selected_sensors)
+    if recovery == "Causal forward fill":
+        return bundle.medians.causal_forward_fill(prefix, bundle.selected_sensors)
+    raise ValueError(f"Unknown recovery method: {recovery}")
+
+
+def predict_prefix(model_name: str, model, prefix: pd.DataFrame, bundle) -> float:
+    """Retained non-LSTM helper; it does not verify saved artifact provenance."""
+    if prefix.empty:
+        raise ValueError("At least one observed cycle is required.")
+    if model_name in {"Random Forest", "XGBoost"}:
+        features, _ = build_tabular_features(prefix, bundle.selected_sensors, bundle.rolling_window)
+        latest = features.iloc[[-1]][bundle.feature_columns]
+        output = model.predict(bundle.tabular_scaler.transform(latest))
+    elif model_name in {"Median", "Median baseline"}:
+        output = model.predict(1)
+    elif model_name == "LSTM":
+        raise ValueError("LSTM requires the validated LSTMInferenceAdapter")
+    else:
+        raise ValueError(f"Unknown prediction model: {model_name}")
+    if np.iscomplexobj(output):
+        raise ValueError("Prediction must be one finite real value before negative clamping")
+    values = np.asarray(output, dtype=float).reshape(-1)
+    if len(values) != 1 or not np.isfinite(values).all():
+        raise ValueError("Prediction must be one finite value before negative clamping")
+    return max(0.0, float(values[0]))
+
+
+def predict_with_scenario(model_name, model, prefix, bundle, scenario, recovery, seed) -> float:
+    corrupted = corrupt_prefix(prefix, bundle, scenario, seed)
+    recovered = recover_prefix(corrupted, bundle, "Training median" if scenario == "Clean" else recovery)
+    if not np.isfinite(recovered[bundle.selected_sensors].to_numpy(dtype=float)).all():
+        raise ValueError("Non-finite sensor values remain after recovery.")
+    return predict_prefix(model_name, model, recovered, bundle)
+
+
+def build_replay(engine, observed_cycle, model_name, model, bundle, scenario, recovery, seed):
+    """Retained helper: truncate and regenerate masks separately at every cycle."""
+    if engine.empty or engine.engine_id.nunique() != 1:
+        raise ValueError("Replay requires one non-empty engine trajectory")
+    visible, _ = _visible_prefix(
+        engine, bundle.selected_sensors, int(engine.engine_id.iloc[0]),
+        _positive_integer(observed_cycle, "observed_cycle"), None,
+    )
+    rows = []
+    for cycle in visible["cycle"].tolist():
+        cycle_prefix = visible[visible["cycle"] <= cycle].copy()
+        corrupted = corrupt_prefix(cycle_prefix, bundle, scenario, seed)
+        recovered = recover_prefix(corrupted, bundle, "Training median" if scenario == "Clean" else recovery)
+        rows.append({"cycle": int(cycle), "rul_pred": predict_prefix(model_name, model, recovered, bundle)})
+    return recovered, pd.DataFrame(rows)
+
+def build_lstm_queue(resources, dataset_split, observed_cycle, k, *, scenario="clean", recovery="median", seed=None):
+    """Rank visible engines in one namespace at the selected replay cutoff."""
+    observed_cycle = _positive_integer(observed_cycle, "observed_cycle")
+    rows = []
+    for (split, engine), cycles in resources.engine_cycles.items():
+        if split != dataset_split or cycles[0] > observed_cycle:
+            continue
+        result = resources.adapter.predict(
+            resources.raw_trajectories, engine, observed_cycle, dataset_split=split,
+            scenario=scenario, recovery=recovery, seed=seed,
+        )
+        if not np.isfinite(result.rul_pred):
+            raise ValueError("Queue predictions must be finite before negative clamping")
+        rows.append({"dataset_split": split, "engine_id": engine,
+                     "observed_cycle": result.cycle, "rul_pred": max(float(result.rul_pred), 0.0)})
+    if not rows:
+        raise ValueError("No engines have visible observations in the selected namespace")
+    return top_k_queue(pd.DataFrame(rows), k=k)
+
 def run_app(artifact_dir: str | Path | None = None):
+    st.set_page_config(page_title="Predictive Maintenance", page_icon="⚙️", layout="wide")
     st.title("Predictive Maintenance — FD001")
+    st.caption("NASA C-MAPSS FD001 demonstration: RUL is in operating cycles, not validated maintenance thresholds.")
     model = st.selectbox("Model", ["Median", "Random Forest", "XGBoost", "LSTM"], index=3, key="model")
     scenario = SCENARIOS[st.selectbox("Missingness scenario", list(SCENARIOS), key="scenario")]
     recovery_options = ["Training median"] if scenario == "clean" else list(RECOVERIES)
     recovery = RECOVERIES[st.selectbox("Recovery method", recovery_options, key="recovery")]
     seed = st.selectbox("Random seed", [7, 17, 27], key="seed") if scenario in {"random_10", "random_20"} else None
-    st.selectbox("Inspection queue K", [5, 10], disabled=True, key="queue_k")
-    st.caption("Inspection queue integration is pending.")
+    k = st.selectbox("Inspection queue K", [5, 10], disabled=model != "LSTM", key="queue_k")
     if model != "LSTM":
-        st.info(f"Saved inference for {model} is not connected in this application yet.")
+        st.info(f"Saved inference for {model} is not connected in this application yet. "
+                "The reusable Task 25 adapter and its artifact/prefix checks are pending; "
+                "replay and queue are unavailable for this model.")
         return
     root = Path(artifact_dir) if artifact_dir is not None else ROOT / "artifacts"
     try:
@@ -75,6 +175,30 @@ def run_app(artifact_dir: str | Path | None = None):
             st.pyplot(figure)
         finally:
             figure.clear()
+
+    st.subheader("RUL replay")
+    st.dataframe(history.tail(10), hide_index=True)
+    with st.expander("Fleet inspection queue"):
+        st.write(QUEUE_NOTE)
+        st.caption(
+            "LSTM queue uses the selected namespace and replay cutoff for every engine. "
+            "Engines with no observations by that cutoff are omitted. Click again after changing controls; "
+            "queue results are not cached."
+        )
+        if st.button("Calculate fleet queue", type="primary", key="calculate_queue"):
+            try:
+                queue = build_lstm_queue(
+                    resources, identity[0], observed_cycle, k,
+                    scenario=scenario, recovery=recovery, seed=seed,
+                )
+            except Exception as exc:
+                st.error(f"LSTM inspection queue is unavailable: {exc}")
+            else:
+                st.dataframe(queue, hide_index=True)
+                st.download_button(
+                    "Download inspection queue CSV", queue.to_csv(index=False).encode("utf-8"),
+                    file_name=f"inspection_queue_top_{k}.csv", mime="text/csv", key="download_queue",
+                )
 
 
 if __name__ == "__main__":

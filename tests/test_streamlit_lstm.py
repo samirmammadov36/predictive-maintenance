@@ -68,7 +68,7 @@ def test_streamlit_start_slider_real_inference_and_actual_plot_data(replay_artif
     assert at.metric[1].value == "Warning"
     assert at.selectbox(key="recovery").options == ["Training median"]
     assert all(widget.key != "seed" for widget in at.selectbox)
-    assert at.selectbox(key="queue_k").proto.disabled
+    assert not at.selectbox(key="queue_k").proto.disabled
     calls.clear()
     at.select_slider[0].set_value(5).run()
     _healthy_app(at)

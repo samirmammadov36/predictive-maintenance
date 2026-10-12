@@ -2,7 +2,7 @@
 
 This summary covers Tasks 3, 9, 10, 15, 19, 23, 27 and 31 for NASA C-MAPSS FD001. Review baseline: `feature/samir` at `d9a98b6d7836244bd7ba9e1f3e016a0638673e8a`. RUL is in **operating cycles**.
 
-The latest full suite was **previously reported as 634 passed** before publication of Task 27 part 2. It was not rerun for this documentation review. Existing test bodies, code and `config.yaml` were inspected now; test names below identify synthetic/regression evidence, not successful real FD001 execution.
+At the Task 31 documentation-review baseline, the full suite was **previously reported as 634 passed** before publication of Task 27 part 2. It was not rerun for this documentation review. Existing test bodies, code and `config.yaml` were inspected now; test names below identify synthetic/regression evidence, not successful real FD001 execution.
 
 ## Task responsibilities
 
@@ -47,7 +47,7 @@ The three trained models each have 15 configurations: 1 clean, 12 random (2 rate
 
 [Inference/replay](lstm_inference_spec.md) selects an engine namespace, retains `cycle <= observed_cycle`, then sorts before sensor processing. Hidden future sensor values, targets, settings and other engines do not enter prediction or charts. `chart_prefix` is a copied recovered, unscaled visible sensor frame containing only identity/cycle/selected sensors. Sensor charts may display the full visible history; model windows use its final 30 observations.
 
-Every RUL replay point at cycle c calls the actual saved adapter with its own cutoff c, mask and recovery; no points after the selected cutoff are computed. App controls map clean to median/no seed and random scenarios to 7/17/27. One-observation histories avoid an invalid slider. Resources are cached by absolute artifact path and hashes of all five consumed files; replay results are recomputed for engine/options/cutoff changes. Missing/incompatible artifacts show errors without substitute predictions. Health labels are shared display rules. Only LSTM is connected; other model controls report pending integration and top-K remains disabled.
+Every RUL replay point at cycle c calls the actual saved adapter with its own cutoff c, mask and recovery; no points after the selected cutoff are computed. App controls map clean to median/no seed and random scenarios to 7/17/27. One-observation histories avoid an invalid slider. Resources are cached by absolute artifact path and hashes of all five consumed files; replay results are recomputed for engine/options/cutoff changes. Missing/incompatible artifacts show errors without substitute predictions. Health labels are shared display rules. Only LSTM is connected; other model controls report pending Task 25 integration. The merged LSTM queue ranks engines within the selected namespace at the selected cutoff and offers CSV download; no queue results are cached.
 
 ## Acceptance evidence
 
@@ -101,7 +101,9 @@ Historical CSVs/plots and teammate reports describe recorded earlier results. Th
 | --- | --- |
 | Rafiq — data/RF | Verify original FD001 files/labels and shared split; provide the frozen RF artifact and later RF inference adapter |
 | Cahid — features/imputation/XGBoost/visualizations | Keep causal recovery/features and frozen schema compatible; provide XGBoost artifacts/adapter; reuse existing plots with bounded data |
-| Lalə — runner/comparison/Streamlit/end-to-end QA | Assemble remaining adapters and top-K queue; reconcile coarse root manifest/export utilities with executable 15-configuration metrics when needed; coordinate real-data/browser acceptance with Samir |
+| Lalə — runner/comparison/Streamlit/end-to-end QA | Provide the missing Task 25 adapters and their non-LSTM queue paths; preserve root manifest alignment with the executable 15-configuration matrix; coordinate real-data/browser acceptance with Samir |
 | Samir — LSTM | Verify real training/selection/checkpoint/evaluation and replay acceptance after data/dependencies are available; preserve the explicit-cutoff and chart-prefix interfaces |
 
 No shared interface or production code changed in this documentation review. Any future shared-interface change needs agreement on namespace identity, raw-prefix recovery order, bounded chart data and artifact provenance.
+
+Integration verification used `.venv\Scripts\python.exe -I -B -m pytest -q -p no:cacheprovider`: **686 passed**, no failures/skips. `pip check` passed. This was synthetic/regression verification, including the retained Task 29 tests; it was not a real FD001 preparation/training/evaluation run or real-checkpoint browser acceptance. No packages were installed; PyYAML and XGBoost are absent from the local .venv, which still blocks the corresponding real-data executable paths.

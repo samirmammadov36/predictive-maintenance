@@ -1,0 +1,24 @@
+{
+  "status": "passed",
+  "official_test_engines": 100,
+  "official_target_rows": 100,
+  "selected_sensor_count": 15,
+  "feature_count": 46,
+  "random_forest_parameters": {
+    "n_estimators": 250,
+    "max_depth": null,
+    "min_samples_leaf": 1
+  },
+  "validation_mae": 17.0276,
+  "validation_rmse": 22.537580526755747,
+  "official_clean_mae": 15.248039999999998,
+  "official_clean_rmse": 21.302307281606844,
+  "raw_negative_predictions_clamped": 0,
+  "verification": [
+    "official test labels map one-to-one to official test engines",
+    "target rows use each engine's final observed cycle",
+    "saved RF feature count matches the frozen preprocessing schema",
+    "saved RF hyperparameters match validation_selection_summary.json",
+    "fresh saved-model clean metrics match clean_comparison.csv"
+  ]
+}

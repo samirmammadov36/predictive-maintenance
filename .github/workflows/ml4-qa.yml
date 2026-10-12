@@ -1,0 +1,36 @@
+name: ML Engineer 4 QA
+
+on:
+  push:
+    branches:
+      - main
+      - feature/lale-ml4-independent-qa
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  independent-contract-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run independent ML Engineer 4 tests
+        run: pytest -q tests/test_ml_engineer4_independent.py
+
+      - name: Run full test suite
+        run: pytest -q
