@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+import torch
+import xgboost as xgb
 
+from predictive_maintenance.artifacts import load_joblib
 from predictive_maintenance.constants import CYCLE_COLUMN, ID_COLUMN
 from predictive_maintenance.dashboard import observed_prefix
 from predictive_maintenance.features import build_tabular_features
@@ -13,12 +18,84 @@ from predictive_maintenance.masks import (
     nested_random_masks,
     short_gap_mask,
 )
-from predictive_maintenance.models.lstm import predict_lstm
+from predictive_maintenance.models.lstm import (
+    LSTMConfig,
+    RULLSTM,
+    predict_lstm,
+)
 from predictive_maintenance.sequences import (
     build_prefix_window,
     scale_sequence_frame,
 )
 
+def load_prepared_bundle(path: str | Path):
+    """Load the saved preprocessing bundle used for inference."""
+    path = Path(path)
+
+    if not path.exists():
+        raise FileNotFoundError(
+            "Prepared data was not found. "
+            "Run download_data.py and prepare_data.py first."
+        )
+
+    return load_joblib(path)
+
+
+def load_saved_models(model_dir: str | Path) -> dict[str, object]:
+    """Load all frozen models required by the dashboard."""
+    model_dir = Path(model_dir)
+
+    required_paths = {
+        "baseline": model_dir / "baseline.joblib",
+        "random_forest": model_dir / "random_forest.joblib",
+        "xgboost": model_dir / "xgboost.json",
+        "lstm_meta": model_dir / "lstm_meta.joblib",
+        "lstm_state": model_dir / "lstm.pt",
+    }
+
+    missing = [
+        str(path)
+        for path in required_paths.values()
+        if not path.exists()
+    ]
+
+    if missing:
+        raise FileNotFoundError(
+            "Model artifacts are missing. "
+            "Run scripts/train_models.py first. Missing: "
+            + ", ".join(missing)
+        )
+
+    baseline = load_joblib(required_paths["baseline"])
+    random_forest = load_joblib(required_paths["random_forest"])
+
+    xgboost_model = xgb.XGBRegressor()
+    xgboost_model.load_model(required_paths["xgboost"])
+
+    metadata = load_joblib(required_paths["lstm_meta"])
+    config = LSTMConfig(**metadata["config"])
+
+    lstm = RULLSTM(
+        config.input_size,
+        config.hidden_units,
+        config.dense_units,
+    )
+
+    lstm.load_state_dict(
+        torch.load(
+            required_paths["lstm_state"],
+            map_location="cpu",
+            weights_only=True,
+        )
+    )
+    lstm.eval()
+
+    return {
+        "Median baseline": baseline,
+        "Random Forest": random_forest,
+        "XGBoost": xgboost_model,
+        "LSTM": lstm,
+    }
 
 def corrupt_prefix(
     prefix: pd.DataFrame,
