@@ -144,40 +144,9 @@ def test_app_queue_actual_predictions_download_and_no_stale_results(replay_artif
     pd.testing.assert_frame_equal(at.dataframe[-1].value, expected_changed)
     assert downloads[-1] == expected_changed.to_csv(index=False).encode("utf-8")
     at.selectbox(key="model").select("Random Forest").run()
-    assert not at.exception and not at.error and not at.metric and not at.dataframe
-    assert not at.button and at.selectbox(key="queue_k").proto.disabled
-    assert any("Task 25" in element.value for element in at.info)
-
-@pytest.mark.parametrize("output", [[], [1, 2], [np.nan], [np.inf], [-np.inf], [1 + 2j]])
-def test_retained_non_lstm_helper_rejects_nonfinite_or_malformed_outputs(replay_artifacts, output):
-    from types import SimpleNamespace
-    bundle, _, _ = replay_artifacts
-    prefix = bundle.official_test_raw_df[lambda frame: (frame.engine_id == 1) & (frame.cycle == 1)]
-    model = SimpleNamespace(predict=lambda n: output)
-    with pytest.raises(ValueError, match="finite.*before negative clamping"):
-        app.predict_prefix("Median baseline", model, prefix, bundle)
-
-
-def test_retained_helpers_cannot_bypass_lstm_and_mask_each_raw_prefix(replay_artifacts, monkeypatch):
-    from types import SimpleNamespace
-    bundle, _, _ = replay_artifacts
-    engine = bundle.official_test_raw_df[lambda frame: frame.engine_id == 1]
-    model = SimpleNamespace(predict=lambda n: [-2])
-    with pytest.raises(ValueError, match="validated LSTMInferenceAdapter"):
-        app.predict_prefix("LSTM", model, engine, bundle)
-    lengths = []
-    original = app.corrupt_prefix
-    def corrupt(prefix, *args):
-        lengths.append(len(prefix))
-        return original(prefix, *args)
-    monkeypatch.setattr(app, "corrupt_prefix", corrupt)
-    chart, history = app.build_replay(
-        engine, 5, "Median baseline", model, bundle, "Five-cycle sensor gap", "Causal forward fill", 7,
-    )
-    assert lengths == [1, 2, 3, 4, 5]
-    assert history.cycle.tolist() == [1, 2, 3, 4, 5] and history.rul_pred.tolist() == [0] * 5
-    assert chart.sensor_11.tolist() == [110.0] * 5
-    assert not {"rul_true", "rul_target", "setting_1"} & set(chart)
+    assert not at.exception and at.error and not at.metric and not at.dataframe
+    assert not at.button and not at.selectbox(key="queue_k").proto.disabled
+    assert "schema.json" in at.error[0].value
 
 @pytest.mark.parametrize("k", [5, 10])
 def test_final_queue_predicts_all_engines_and_breaks_actual_model_ties_by_engine_id(replay_artifacts, k):

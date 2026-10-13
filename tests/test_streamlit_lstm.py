@@ -202,13 +202,13 @@ def test_missing_incompatible_artifacts_show_message_without_prediction_or_excep
 
 
 @pytest.mark.parametrize("model", ["Median", "Random Forest", "XGBoost"])
-def test_other_model_controls_report_integration_status_without_dummy_outputs(replay_artifacts, model):
+def test_other_model_missing_artifacts_report_error_without_dummy_outputs(replay_artifacts, model):
     _, root, _ = replay_artifacts
     at = _application(root)
     at.selectbox(key="model").select(model).run()
-    assert not at.exception and not at.error and not at.metric
-    assert any(f"Saved inference for {model} is not connected" in element.value for element in at.info)
-    assert at.selectbox(key="queue_k").proto.disabled
+    assert not at.exception and at.error and not at.metric
+    assert f"Saved {model} replay is unavailable" in at.error[0].value
+    assert not at.selectbox(key="queue_k").proto.disabled
 
 
 def test_namespace_engine_selector_keeps_identical_ids_isolated(replay_artifacts, rendered):

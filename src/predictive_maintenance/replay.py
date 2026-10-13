@@ -1,15 +1,16 @@
-"""Streamlit-independent loading and per-cutoff saved LSTM replay."""
+"""Streamlit-independent selected-model loading, per-cutoff replay and final-snapshot queues."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 
 from .constants import CYCLE_COLUMN, ID_COLUMN
 from .data import file_manifest
-from .inference import LSTMInferenceAdapter, LSTMInferenceResult, _positive_integer
+from .inference import InferenceResult, load_inference_adapter, _positive_integer
 from .masks import _positive_integer_values
 from .prepared import official_test_raw_frame
 
@@ -18,18 +19,27 @@ REPLAY_ARTIFACTS = (
     "preprocessing/split_manifest.json", "models/lstm.pt", "models/lstm_checkpoint_metadata.json",
 )
 
+MODEL_ARTIFACTS = {
+    "lstm": REPLAY_ARTIFACTS,
+    "random_forest": ("preprocessing/prepared_bundle.joblib", "preprocessing/schema.json", "models/random_forest.joblib"),
+    "xgboost": ("preprocessing/prepared_bundle.joblib", "preprocessing/schema.json", "models/xgboost.json"),
+    "median_baseline": ("preprocessing/prepared_bundle.joblib", "models/baseline.joblib"),
+}
+
 
 @dataclass(frozen=True)
-class LSTMReplayResources:
-    adapter: LSTMInferenceAdapter
+class ReplayResources:
+    adapter: object
     raw_trajectories: pd.DataFrame
     engine_cycles: dict[tuple[str | None, int], tuple[int, ...]]
 
 
-def artifact_fingerprint(artifact_dir: str | Path) -> tuple[tuple[str, str], ...]:
+def artifact_fingerprint(artifact_dir: str | Path, model_name: str = "lstm") -> tuple[tuple[str, str], ...]:
     """Hash every file actually consumed by bundle/checkpoint loading."""
     root = Path(artifact_dir)
-    return tuple((name, file_manifest(root / name).sha256) for name in REPLAY_ARTIFACTS)
+    if model_name not in MODEL_ARTIFACTS:
+        raise ValueError(f"Unknown saved inference model: {model_name}")
+    return tuple((name, file_manifest(root / name).sha256) for name in MODEL_ARTIFACTS[model_name])
 
 
 def available_engine_cycles(raw: pd.DataFrame) -> dict:
@@ -58,18 +68,18 @@ def available_engine_cycles(raw: pd.DataFrame) -> dict:
     return choices
 
 
-def load_replay_resources(artifact_dir: str | Path) -> LSTMReplayResources:
+def load_replay_resources(artifact_dir: str | Path, model_name: str = "lstm") -> ReplayResources:
     root = Path(artifact_dir)
     bundle = joblib.load(root / "preprocessing/prepared_bundle.joblib")
     raw = official_test_raw_frame(bundle)
     choices = available_engine_cycles(raw)
-    return LSTMReplayResources(LSTMInferenceAdapter(bundle, root), raw, choices)
+    return ReplayResources(load_inference_adapter(bundle, root, model_name), raw, choices)
 
 
-def build_lstm_replay(
-    resources: LSTMReplayResources, identity: tuple[str | None, int], observed_cycle: int, *,
+def build_model_replay(
+    resources: ReplayResources, identity: tuple[str | None, int], observed_cycle: int, *,
     scenario: str = "clean", recovery: str = "median", seed: int | None = None,
-) -> tuple[LSTMInferenceResult, pd.DataFrame]:
+) -> tuple[InferenceResult, pd.DataFrame]:
     """Predict each available history point independently; never reuse a recovered full prefix."""
     observed_cycle = _positive_integer(observed_cycle, "observed_cycle")
     if identity not in resources.engine_cycles:
@@ -86,3 +96,27 @@ def build_lstm_replay(
         )
         rows.append({"cycle": result.cycle, "rul_pred": result.rul_pred})
     return result, pd.DataFrame(rows)
+
+# Public LSTM names remain aliases of the shared interfaces.
+LSTMReplayResources = ReplayResources
+build_lstm_replay = build_model_replay
+
+
+def build_inspection_queue(resources, dataset_split, k, *, scenario="clean", recovery="median", seed=None):
+    """Predict every selected-namespace final snapshot before top-K ranking."""
+    from .dashboard import top_k_queue
+    rows = []
+    for (split, engine), cycles in resources.engine_cycles.items():
+        if split != dataset_split:
+            continue
+        result = resources.adapter.predict(
+            resources.raw_trajectories, engine, cycles[-1], dataset_split=split,
+            scenario=scenario, recovery=recovery, seed=seed,
+        )
+        if not np.isfinite(result.rul_pred):
+            raise ValueError("Queue predictions must be finite before negative clamping")
+        rows.append({"dataset_split": split, "engine_id": engine,
+                     "observed_cycle": result.cycle, "rul_pred": max(float(result.rul_pred), 0.0)})
+    if not rows:
+        raise ValueError("No engines in the selected namespace")
+    return top_k_queue(pd.DataFrame(rows), k=k)
