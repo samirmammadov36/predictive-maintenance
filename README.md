@@ -320,19 +320,30 @@ These are demonstration rules only. They are not a separately trained classifier
 ├── run_experiments.py
 ├── requirements.txt
 ├── PROJECT_STATUS.md
+├── experiment_manifest.csv
 │
 ├── src/
 │   └── predictive_maintenance/
-│       ├── data.py
-│       ├── targets.py
-│       ├── screening.py
-│       ├── imputation.py
-│       ├── features.py
-│       ├── sequences.py
-│       ├── masks.py
+│       ├── artifacts.py
+│       ├── config.py
+│       ├── constants.py
 │       ├── dashboard.py
+│       ├── data.py
+│       ├── evaluation.py
+│       ├── experiments.py
+│       ├── features.py
+│       ├── imputation.py
 │       ├── inference.py
+│       ├── masks.py
+│       ├── prefixes.py
+│       ├── prepared.py
+│       ├── screening.py
+│       ├── sequences.py
 │       └── models/
+│           ├── baseline.py
+│           ├── lstm.py
+│           ├── random_forest.py
+│           └── xgboost_model.py
 │
 ├── scripts/
 │   ├── download_data.py
@@ -347,6 +358,8 @@ These are demonstration rules only. They are not a separately trained classifier
 ├── tests/
 ├── docs/
 ├── notebooks/
+├── artifacts/
+├── data/
 └── results/
 ```
 
