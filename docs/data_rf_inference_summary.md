@@ -2,9 +2,9 @@
 
 ## Scope
 
-This document covers the inherited Task 29 responsibility: test and document the FD001 data loader, RUL target calculation, Random Forest pipeline, and saved-model usage. It also records the prediction contract that the shared inference layer must preserve.
+This document covers the inherited Task 29 responsibility: test and document the FD001 data loader, RUL target calculation, Random Forest pipeline, and saved-model usage. It also records the prediction contract that the shared inference layer preserves.
 
-The reusable multi-model inference module itself belongs to Task 25 and is handled separately. Task 29 verifies the data/RF side that Task 25 must consume.
+The reusable multi-model inference module itself belongs to Task 25 and is implemented separately in `src/predictive_maintenance/inference.py`. Task 29 verifies the data/RF side consumed by that shared inference layer.
 
 ## FD001 Raw Data Loader
 
@@ -99,7 +99,7 @@ For a clean Random Forest prediction at an observed engine prefix, the saved-mod
 7. clamp a negative prediction to zero
 8. interpret the result as Remaining Useful Life in operating cycles
 
-The current Streamlit application follows this contract for its inline RF prediction path. Task 25's reusable inference module should preserve the same ordering and preprocessing objects rather than introducing a second RF preprocessing implementation.
+The final Streamlit application uses the shared inference layer in `src/predictive_maintenance/inference.py`. The reusable inference path loads the same prepared bundle and saved Random Forest artifact and preserves this preprocessing and prediction contract.
 
 ## Official Clean Random Forest Result
 
@@ -124,7 +124,7 @@ The committed Random Forest result plots are:
 - one-based mapping of `RUL_FD001.txt` rows to test engine IDs and final observed cycles
 - Random Forest prediction consistency after a Joblib save/load round trip using the same causal tabular feature pipeline
 
-These complement the existing core tests for split isolation, causal features, imputation, masks, and sequence boundaries.
+These complement the existing core tests for split isolation, causal features, imputation, masks, sequence boundaries, reusable inference, and replay causality.
 
 ## Real-Artifact Verification
 
@@ -142,8 +142,24 @@ The script loads the actual generated `prepared_bundle.joblib` and `random_fores
 - saved Random Forest hyperparameters match the selected validation configuration
 - fresh predictions from the saved Random Forest reproduce the committed clean MAE/RMSE within numerical tolerance
 
-A successful run writes `results/metrics/data_rf_verification.json`. This file is small and can be committed as verification evidence after the script passes.
+A successful run writes `results/metrics/data_rf_verification.json`.
 
-## Handoff to Shared Inference
+The final project QA run completed this verification successfully with:
 
-Task 29 does not require duplicating Task 25. Once the reusable inference module is finalized, it should load the same prepared bundle and saved Random Forest artifact and follow the prediction contract documented above. The final integration owner can then call that shared inference code from Streamlit instead of maintaining duplicate model-loading/preprocessing logic in `app.py`.
+```text
+status: passed
+official_test_engines: 100
+official_target_rows: 100
+selected_sensor_count: 15
+feature_count: 46
+```
+
+## Shared Inference Integration
+
+The reusable inference module is finalized in `src/predictive_maintenance/inference.py`.
+
+It loads the prepared preprocessing bundle and saved model artifacts and follows the prediction contract documented above.
+
+The final Streamlit application imports this shared inference functionality rather than maintaining duplicate model-loading and preprocessing logic inside `app.py`.
+
+This keeps Random Forest preprocessing and prediction behavior consistent between verification code, reusable inference, and the dashboard.
