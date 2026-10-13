@@ -8,13 +8,9 @@ import sys
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
-import joblib
 import pandas as pd
 import streamlit as st
-import torch
-import xgboost as xgb
 
-from predictive_maintenance.artifacts import load_joblib
 from predictive_maintenance.constants import CYCLE_COLUMN, ID_COLUMN
 from predictive_maintenance.dashboard import (
     HEALTH_STATUS_NOTE,
@@ -27,9 +23,10 @@ from predictive_maintenance.dashboard import (
 from predictive_maintenance.inference import (
     build_replay,
     corrupt_prefix,
+    load_prepared_bundle,
+    load_saved_models,
     predict_with_scenario,
 )
-from predictive_maintenance.models.lstm import LSTMConfig, RULLSTM
 
 
 PREPARED_PATH = ROOT / "artifacts/preprocessing/prepared_bundle.joblib"
@@ -38,63 +35,12 @@ MODEL_DIR = ROOT / "artifacts/models"
 
 @st.cache_resource
 def load_bundle():
-    if not PREPARED_PATH.exists():
-        raise FileNotFoundError(
-            "Prepared data was not found. Run download_data.py and prepare_data.py first."
-        )
-
-    return joblib.load(PREPARED_PATH)
+    return load_prepared_bundle(PREPARED_PATH)
 
 
 @st.cache_resource
 def load_models():
-    missing = [
-        str(path)
-        for path in (
-            MODEL_DIR / "baseline.joblib",
-            MODEL_DIR / "random_forest.joblib",
-            MODEL_DIR / "xgboost.json",
-            MODEL_DIR / "lstm_meta.joblib",
-            MODEL_DIR / "lstm.pt",
-        )
-        if not path.exists()
-    ]
-
-    if missing:
-        raise FileNotFoundError(
-            "Model artifacts are missing. Run scripts/train_models.py first. Missing: "
-            + ", ".join(missing)
-        )
-
-    baseline = load_joblib(MODEL_DIR / "baseline.joblib")
-    random_forest = load_joblib(MODEL_DIR / "random_forest.joblib")
-
-    xgboost_model = xgb.XGBRegressor()
-    xgboost_model.load_model(MODEL_DIR / "xgboost.json")
-
-    metadata = load_joblib(MODEL_DIR / "lstm_meta.joblib")
-    config = LSTMConfig(**metadata["config"])
-
-    lstm = RULLSTM(
-        config.input_size,
-        config.hidden_units,
-        config.dense_units,
-    )
-
-    lstm.load_state_dict(
-        torch.load(
-            MODEL_DIR / "lstm.pt",
-            map_location="cpu",
-        )
-    )
-    lstm.eval()
-
-    return {
-        "Median baseline": baseline,
-        "Random Forest": random_forest,
-        "XGBoost": xgboost_model,
-        "LSTM": lstm,
-    }
+    return load_saved_models(MODEL_DIR)
 
 
 def main() -> None:

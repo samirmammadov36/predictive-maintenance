@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 import predictive_maintenance.inference as inference
 from predictive_maintenance.constants import CYCLE_COLUMN, ID_COLUMN
@@ -67,12 +68,12 @@ def test_lstm_prefix_window_handles_early_cycles():
     sensors = ["sensor_1", "sensor_2"]
 
     frame = pd.DataFrame(
-    {
-        CYCLE_COLUMN: [1, 2, 3],
-        "sensor_1": [10.0, 20.0, 30.0],
-        "sensor_2": [1.0, 2.0, 3.0],
-    }
-)
+        {
+            CYCLE_COLUMN: [1, 2, 3],
+            "sensor_1": [10.0, 20.0, 30.0],
+            "sensor_2": [1.0, 2.0, 3.0],
+        }
+    )
 
     window = build_prefix_window(
         frame,
@@ -93,3 +94,54 @@ def test_lstm_prefix_window_handles_early_cycles():
     )
 
     np.testing.assert_allclose(window, expected)
+
+
+@pytest.mark.parametrize(
+    ("history_length", "expected_first_cycle", "expected_last_cycle"),
+    [
+        (1, 1, 1),
+        (29, 1, 29),
+        (30, 1, 30),
+        (31, 2, 31),
+    ],
+)
+def test_lstm_prefix_window_uses_real_30_cycle_boundary(
+    history_length,
+    expected_first_cycle,
+    expected_last_cycle,
+):
+    sensors = ["sensor_1", "sensor_2"]
+
+    frame = pd.DataFrame(
+        {
+            CYCLE_COLUMN: list(range(1, history_length + 1)),
+            "sensor_1": [
+                float(cycle)
+                for cycle in range(1, history_length + 1)
+            ],
+            "sensor_2": [
+                float(cycle * 10)
+                for cycle in range(1, history_length + 1)
+            ],
+        }
+    )
+
+    window = build_prefix_window(
+        frame,
+        sensors,
+        window=30,
+    )
+
+    assert window.shape == (30, 2)
+
+    # The newest observation must always be the final row.
+    assert window[-1, 0] == expected_last_cycle
+
+    if history_length < 30:
+        # Short histories are left-padded using the first observation.
+        assert window[0, 0] == expected_first_cycle
+        assert window[30 - history_length - 1, 0] == expected_first_cycle
+
+    else:
+        # Histories >= 30 keep only the latest 30 observations.
+        assert window[0, 0] == expected_first_cycle
