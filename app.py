@@ -20,6 +20,7 @@ from predictive_maintenance.dashboard import (
     plot_sensor_history,
     top_k_queue,
 )
+from predictive_maintenance.deployment import ensure_deployment_artifacts
 from predictive_maintenance.inference import (
     build_replay,
     corrupt_prefix,
@@ -59,14 +60,21 @@ def main() -> None:
     )
 
     try:
+        ensure_deployment_artifacts(ROOT)
+
         bundle = load_bundle()
         models = load_models()
 
-    except (FileNotFoundError, OSError, ValueError) as exc:
+    except (
+        RuntimeError,
+        FileNotFoundError,
+        OSError,
+        ValueError,
+    ) as exc:
         st.error(str(exc))
 
         st.info(
-            "From the repository root, install requirements and run: "
+            "If running locally, install requirements and run: "
             "python scripts/download_data.py → "
             "python scripts/prepare_data.py → "
             "python scripts/train_models.py"
